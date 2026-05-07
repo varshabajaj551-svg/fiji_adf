@@ -1,0 +1,226 @@
+{
+	"name": "Backup_00_pl_load_master",
+	"properties": {
+		"activities": [
+			{
+				"name": "load_bronze",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "reset_checkpoints",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "01_pl_load_bronze",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "load_silver",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "load_bronze",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "02_pl_load_silver",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "load_gold",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "load_silver",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "03_pl_load_gold",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "load_platinum",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "load_gold",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "04_pl_load_platinum",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "reset_checkpoints",
+				"type": "Script",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "Snowflake_fiji_ls",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": "UPDATE FIJI_AIRWAYS.AUDIT.PIPELINE_CONTROL SET STATUS = 'PENDING'"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			},
+			{
+				"name": "Web_UpdateFailureToJira",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "load_silver",
+						"dependencyConditions": [
+							"Failed",
+							"Skipped"
+						]
+					},
+					{
+						"activity": "load_gold",
+						"dependencyConditions": [
+							"Failed",
+							"Skipped"
+						]
+					},
+					{
+						"activity": "load_platinum",
+						"dependencyConditions": [
+							"Failed",
+							"Skipped"
+						]
+					},
+					{
+						"activity": "load_bronze",
+						"dependencyConditions": [
+							"Failed",
+							"Skipped"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"headers": {
+						"Authorization": "Basic dmFyc2hhLmJhamFqQG5hZ2Fycm8uY29tOkFUQVRUM3hGZkdGMHhRNEQtcWFSVWxXb2M1akRoN3loZzY5UUZTR2JqNkNwMzN1NmRWc0ktd2tBYlFyNzI0SVI2aGlQenRXNEhSY1RrLUY3WGdSQmNhSEhYdDFna1hyRzZVTzQ0VFo2Y1RQNWtxUG9Ub3VpeXhqZ0F3N0Z5ZlVGeWg2Wk04b0VKNFFDSFRzcVA3Z0dFQ205Vm84SU83VDJneXhHZTExTnJ5UmVrZDdzQVlOeF85MD1DQzJEMzdGQg==",
+						"Content-Type": "application/json"
+					},
+					"url": "https://one-atlas-orpu.atlassian.net/rest/api/3/issue",
+					"body": {
+						"fields": {
+							"project": {
+								"key": "FGTO"
+							},
+							"summary": "PIPELINE INCIDENT: Failure in @{pipeline().Pipeline}",
+							"description": {
+								"type": "doc",
+								"version": 1,
+								"content": [
+									{
+										"type": "paragraph",
+										"content": [
+											{
+												"text": "The pipeline run failed. Error details: @{coalesce(activity('load_silver')?.Error?.Message, activity('load_gold')?.Error?.Message, activity('load_platinum')?.Error?.Message, 'Details unavailable')}",
+												"type": "text"
+											}
+										]
+									}
+								]
+							},
+							"issuetype": {
+								"id": "10006"
+							},
+							"customfield_10010": "389"
+						}
+					}
+				}
+			},
+			{
+				"name": "Failed",
+				"type": "Fail",
+				"dependsOn": [
+					{
+						"activity": "Web_UpdateFailureToJira",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"message": "Pipeline failed in Silver/Gold/Platinum load. Jira ticket has been created successfully.",
+					"errorCode": "500"
+				}
+			}
+		],
+		"folder": {
+			"name": "Snowflake Hosted dbt"
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-05-05T10:34:05Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

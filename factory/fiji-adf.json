@@ -1,0 +1,15 @@
+{
+	"name": "fiji-adf",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Enabled",
+			"editable": true
+		}
+	},
+	"location": "centralindia",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "bef082c8-6b13-4b9b-ac3e-9e025669bab5",
+		"tenantId": "a45fe71a-f480-4e42-ad5e-aff33165aa35"
+	}
+}

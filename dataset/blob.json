@@ -1,0 +1,102 @@
+{
+	"name": "blob",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureBlobStorage1",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "DelimitedText",
+		"typeProperties": {
+			"location": {
+				"type": "AzureBlobStorageLocation",
+				"fileName": "fiji_otp.csv",
+				"container": "raw"
+			},
+			"columnDelimiter": ",",
+			"rowDelimiter": "\r\n",
+			"escapeChar": "\\",
+			"firstRowAsHeader": true,
+			"quoteChar": "\""
+		},
+		"schema": [
+			{
+				"name": "flight_no",
+				"type": "String"
+			},
+			{
+				"name": "date",
+				"type": "String"
+			},
+			{
+				"name": "origin",
+				"type": "String"
+			},
+			{
+				"name": "destination",
+				"type": "String"
+			},
+			{
+				"name": "destination_city",
+				"type": "String"
+			},
+			{
+				"name": "route",
+				"type": "String"
+			},
+			{
+				"name": "aircraft_type",
+				"type": "String"
+			},
+			{
+				"name": "sched_dep",
+				"type": "String"
+			},
+			{
+				"name": "actual_dep",
+				"type": "String"
+			},
+			{
+				"name": "sched_arr",
+				"type": "String"
+			},
+			{
+				"name": "actual_arr",
+				"type": "String"
+			},
+			{
+				"name": "dep_delay_min",
+				"type": "String"
+			},
+			{
+				"name": "arr_delay_min",
+				"type": "String"
+			},
+			{
+				"name": "on_time",
+				"type": "String"
+			},
+			{
+				"name": "delay_cause",
+				"type": "String"
+			},
+			{
+				"name": "sector_distance_km",
+				"type": "String"
+			},
+			{
+				"name": "block_hours",
+				"type": "String"
+			},
+			{
+				"name": "cancellation",
+				"type": "String"
+			},
+			{
+				"name": "diversion",
+				"type": "String"
+			}
+		]
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

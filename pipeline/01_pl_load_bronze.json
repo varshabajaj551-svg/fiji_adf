@@ -1,0 +1,316 @@
+{
+	"name": "01_pl_load_bronze",
+	"properties": {
+		"activities": [
+			{
+				"name": "LKP_GetIngestionMetadata",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SnowflakeV2Source",
+						"query": "SELECT * FROM FIJI_AIRWAYS.METADATA.INGEST_CONFIG\nWHERE ACTIVE_FLAG = TRUE;",
+						"exportSettings": {
+							"type": "SnowflakeExportCopyCommand"
+						},
+						"treatDecimalAsString": false
+					},
+					"dataset": {
+						"referenceName": "Snowflake",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "FE_BronzeIngestion",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "LKP_GetIngestionMetadata",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('LKP_GetIngestionMetadata').output.value",
+						"type": "Expression"
+					},
+					"isSequential": false,
+					"activities": [
+						{
+							"name": "SCR_AuditStart",
+							"type": "Script",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "Snowflake_fiji_ls",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"type": "Query",
+										"text": {
+											"value": "INSERT INTO FIJI_AIRWAYS.AUDIT.PIPELINE_RUN_LOG\n(\n  RUN_ID,\n  PIPELINE_NAME,\n  TABLE_NAME,\n  FILE_NAME,\n  STATUS,\n  START_TIME\n)\nVALUES\n(\n  '@{concat(pipeline().RunId, '-', item().TABLE_NAME)}',\n  'PL_METADATA_INGESTION',\n  '@{item().TABLE_NAME}',\n  '@{item().FILE_NAME}',\n  'STARTED',\n  CURRENT_TIMESTAMP()\n);",
+											"type": "Expression"
+										}
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						},
+						{
+							"name": "CP_LoadToBronze",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "SCR_AuditStart",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "DelimitedTextSource",
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": true,
+										"enablePartitionDiscovery": false
+									},
+									"formatSettings": {
+										"type": "DelimitedTextReadSettings"
+									}
+								},
+								"sink": {
+									"type": "SnowflakeV2Sink",
+									"preCopyScript": {
+										"value": "TRUNCATE TABLE FIJI_AIRWAYS.BRONZE.@{item().TABLE_NAME};",
+										"type": "Expression"
+									},
+									"importSettings": {
+										"type": "SnowflakeImportCopyCommand"
+									}
+								},
+								"enableStaging": true,
+								"stagingSettings": {
+									"linkedServiceName": {
+										"referenceName": "blob_ls_sas",
+										"type": "LinkedServiceReference"
+									},
+									"path": "staging/snowflake/"
+								},
+								"translator": {
+									"type": "TabularTranslator",
+									"typeConversion": true,
+									"typeConversionSettings": {
+										"allowDataTruncation": true,
+										"treatBooleanAsNumber": false
+									}
+								}
+							},
+							"inputs": [
+								{
+									"referenceName": "DS_ADLS_CSV",
+									"type": "DatasetReference",
+									"parameters": {
+										"folderPath": "@item().FILE_PATH",
+										"fileName": {
+											"value": "@item().FILE_NAME",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "DS_SNOWFLAKE_TABLE",
+									"type": "DatasetReference",
+									"parameters": {
+										"tableName": "@item().TABLE_NAME"
+									}
+								}
+							]
+						},
+						{
+							"name": "SCR_AuditEnd",
+							"type": "Script",
+							"dependsOn": [
+								{
+									"activity": "CP_LoadToBronze",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "Snowflake_fiji_ls",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"type": "Query",
+										"text": {
+											"value": "UPDATE FIJI_AIRWAYS.AUDIT.PIPELINE_RUN_LOG\nSET\n  END_TIME = CURRENT_TIMESTAMP(),\n  STATUS = 'SUCCESS',\n  ROWS_LOADED = @{activity('CP_LoadToBronze').output.rowsCopied},\n  ERROR_MESSAGE = NULL\nWHERE\n  RUN_ID = '@{concat(pipeline().RunId, '-', item().TABLE_NAME)}';",
+											"type": "Expression"
+										}
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						},
+						{
+							"name": "SCR_AuditFailure",
+							"type": "Script",
+							"dependsOn": [
+								{
+									"activity": "CP_LoadToBronze",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "Snowflake_fiji_ls",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"type": "Query",
+										"text": {
+											"value": "UPDATE FIJI_AIRWAYS.AUDIT.PIPELINE_RUN_LOG\nSET\n  END_TIME = CURRENT_TIMESTAMP(),\n  STATUS = 'FAILED',\n  ERROR_MESSAGE = '@{string(activity('CP_LoadToBronze').error)}'\nWHERE\n  RUN_ID = '@{concat(pipeline().RunId, '-', item().TABLE_NAME)}';",
+											"type": "Expression"
+										}
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "UpdateBronzeSuccess",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "SCR_Load_Bronze",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "Snowflake_fiji_ls",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": "UPDATE FIJI_AIRWAYS.AUDIT.PIPELINE_CONTROL \nSET STATUS = 'SUCCESS', LAST_COMPLETED_TS = CURRENT_TIMESTAMP() \nWHERE LAYER_NAME = 'bronze'\n"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			},
+			{
+				"name": "SCR_Load_Bronze",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "FE_BronzeIngestion",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "Snowflake_fiji_ls",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": "EXECUTE DBT PROJECT fiji_airways.public.fiji_airline_project\n  ARGS = 'run --select tag:bronze --vars ''{\"layer_name\":\"bronze\"}''';"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			}
+		],
+		"folder": {
+			"name": "Snowflake Hosted dbt"
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-05-05T10:34:04Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

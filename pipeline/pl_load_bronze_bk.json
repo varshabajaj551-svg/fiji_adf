@@ -1,0 +1,427 @@
+{
+	"name": "pl_load_bronze_bk",
+	"properties": {
+		"activities": [
+			{
+				"name": "Lookup_Config",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SnowflakeV2Source",
+						"query": "SELECT * FROM FIJI_AIRWAYS.METADATA.INGEST_CONFIG\nWHERE ACTIVE_FLAG = TRUE;",
+						"exportSettings": {
+							"type": "SnowflakeExportCopyCommand"
+						},
+						"treatDecimalAsString": false
+					},
+					"dataset": {
+						"referenceName": "Snowflake",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEach",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Lookup_Config",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Lookup_Config').output.value",
+						"type": "Expression"
+					},
+					"isSequential": false,
+					"activities": [
+						{
+							"name": "Audit_Start",
+							"type": "Script",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "Snowflake_fiji_ls",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"type": "Query",
+										"text": {
+											"value": "INSERT INTO FIJI_AIRWAYS.AUDIT.PIPELINE_RUN_LOG\n(\n  RUN_ID,\n  PIPELINE_NAME,\n  TABLE_NAME,\n  FILE_NAME,\n  STATUS,\n  START_TIME\n)\nVALUES\n(\n  '@{concat(pipeline().RunId, '-', item().TABLE_NAME)}',\n  'PL_METADATA_INGESTION',\n  '@{item().TABLE_NAME}',\n  '@{item().FILE_NAME}',\n  'STARTED',\n  CURRENT_TIMESTAMP()\n);",
+											"type": "Expression"
+										}
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						},
+						{
+							"name": "Copy_To_Snowflake",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "Audit_Start",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "DelimitedTextSource",
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": true,
+										"enablePartitionDiscovery": false
+									},
+									"formatSettings": {
+										"type": "DelimitedTextReadSettings"
+									}
+								},
+								"sink": {
+									"type": "SnowflakeV2Sink",
+									"preCopyScript": {
+										"value": "TRUNCATE TABLE FIJI_AIRWAYS.BRONZE.@{item().TABLE_NAME};",
+										"type": "Expression"
+									},
+									"importSettings": {
+										"type": "SnowflakeImportCopyCommand"
+									}
+								},
+								"enableStaging": true,
+								"stagingSettings": {
+									"linkedServiceName": {
+										"referenceName": "blob_ls_sas",
+										"type": "LinkedServiceReference"
+									},
+									"path": "staging/snowflake/"
+								},
+								"translator": {
+									"type": "TabularTranslator",
+									"typeConversion": true,
+									"typeConversionSettings": {
+										"allowDataTruncation": true,
+										"treatBooleanAsNumber": false
+									}
+								}
+							},
+							"inputs": [
+								{
+									"referenceName": "DS_ADLS_CSV",
+									"type": "DatasetReference",
+									"parameters": {
+										"folderPath": "@item().FILE_PATH",
+										"fileName": {
+											"value": "@item().FILE_NAME",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "DS_SNOWFLAKE_TABLE",
+									"type": "DatasetReference",
+									"parameters": {
+										"tableName": "@item().TABLE_NAME"
+									}
+								}
+							]
+						},
+						{
+							"name": "Audit_End",
+							"type": "Script",
+							"dependsOn": [
+								{
+									"activity": "Copy_To_Snowflake",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "Snowflake_fiji_ls",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"type": "Query",
+										"text": {
+											"value": "UPDATE FIJI_AIRWAYS.AUDIT.PIPELINE_RUN_LOG\nSET\n  END_TIME = CURRENT_TIMESTAMP(),\n  STATUS = 'SUCCESS',\n  ROWS_LOADED = @{activity('Copy_To_Snowflake').output.rowsCopied},\n  ERROR_MESSAGE = NULL\nWHERE\n  RUN_ID = '@{concat(pipeline().RunId, '-', item().TABLE_NAME)}';",
+											"type": "Expression"
+										}
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						},
+						{
+							"name": "Audit_Failure",
+							"type": "Script",
+							"dependsOn": [
+								{
+									"activity": "Copy_To_Snowflake",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"linkedServiceName": {
+								"referenceName": "Snowflake_fiji_ls",
+								"type": "LinkedServiceReference"
+							},
+							"typeProperties": {
+								"scripts": [
+									{
+										"type": "Query",
+										"text": {
+											"value": "UPDATE AIRLINES_DEMO.AUDIT.PIPELINE_RUN_LOG\nSET\n  END_TIME = CURRENT_TIMESTAMP(),\n  STATUS = 'FAILED',\n  ERROR_MESSAGE = '@{string(activity('Copy_To_Snowflake').error)}'\nWHERE\n  RUN_ID = '@{concat(pipeline().RunId, '-', item().TABLE_NAME)}';",
+											"type": "Expression"
+										}
+									}
+								],
+								"scriptBlockExecutionTimeout": "02:00:00",
+								"treatDecimalAsString": false
+							}
+						},
+						{
+							"name": "Call_LogicApp_On_Failure",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "Audit_Failure",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"headers": {
+									"Content-Type": "application/json"
+								},
+								"url": "https://prod-04.centralindia.logic.azure.com:443/workflows/0724be0578034dec9fc5c27386f65dc2/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=4ELaJ6C9uqq5yvnG2BlOBilA5p8mGGn_BpjOiJlx-dw",
+								"body": {
+									"pipeline": "ADF_MEDALLION_PIPELINE",
+									"table": "@{item().TABLE_NAME}",
+									"runId": "@{pipeline().RunId}",
+									"error": "@{string(activity('Copy_To_Snowflake').error.message)}",
+									"time": "@{utcnow()}"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Web1",
+				"type": "WebActivity",
+				"state": "Inactive",
+				"onInactiveMarkAs": "Succeeded",
+				"dependsOn": [
+					{
+						"activity": "ForEach",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-30.centralindia.logic.azure.com:443/workflows/e94c30522d274777a4e0be5699603008/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=DEIvkFK-jmBgV2tlagxCr4qCpxZO0RM_Ra0aHHXaTgg",
+					"body": {
+						"dbt_command": "run"
+					}
+				}
+			},
+			{
+				"name": "Web_Bronze",
+				"type": "WebActivity",
+				"state": "Inactive",
+				"onInactiveMarkAs": "Succeeded",
+				"dependsOn": [
+					{
+						"activity": "Web1",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-30.centralindia.logic.azure.com:443/workflows/e94c30522d274777a4e0be5699603008/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=DEIvkFK-jmBgV2tlagxCr4qCpxZO0RM_Ra0aHHXaTgg",
+					"body": {
+						"dbt_command": "bronze"
+					}
+				}
+			},
+			{
+				"name": "Web_Silver",
+				"type": "WebActivity",
+				"state": "Inactive",
+				"onInactiveMarkAs": "Succeeded",
+				"dependsOn": [
+					{
+						"activity": "Web_Bronze",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-30.centralindia.logic.azure.com:443/workflows/e94c30522d274777a4e0be5699603008/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=DEIvkFK-jmBgV2tlagxCr4qCpxZO0RM_Ra0aHHXaTgg",
+					"body": {
+						"dbt_command": "silver"
+					}
+				}
+			},
+			{
+				"name": "Web_Gold",
+				"type": "WebActivity",
+				"state": "Inactive",
+				"onInactiveMarkAs": "Succeeded",
+				"dependsOn": [
+					{
+						"activity": "Web_Silver",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-30.centralindia.logic.azure.com:443/workflows/e94c30522d274777a4e0be5699603008/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=DEIvkFK-jmBgV2tlagxCr4qCpxZO0RM_Ra0aHHXaTgg",
+					"body": {
+						"dbt_command": "gold"
+					}
+				}
+			},
+			{
+				"name": "Web_Platinum",
+				"type": "WebActivity",
+				"state": "Inactive",
+				"onInactiveMarkAs": "Succeeded",
+				"dependsOn": [
+					{
+						"activity": "Web_Gold",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"url": "https://prod-30.centralindia.logic.azure.com:443/workflows/e94c30522d274777a4e0be5699603008/triggers/When_an_HTTP_request_is_received/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=DEIvkFK-jmBgV2tlagxCr4qCpxZO0RM_Ra0aHHXaTgg",
+					"body": {
+						"dbt_command": "platinum"
+					}
+				}
+			}
+		],
+		"folder": {
+			"name": "Docker-Logic App"
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-05-02T09:44:36Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

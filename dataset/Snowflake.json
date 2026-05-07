@@ -1,0 +1,13 @@
+{
+	"name": "Snowflake",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "Snowflake_fiji_ls",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "SnowflakeV2Table",
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

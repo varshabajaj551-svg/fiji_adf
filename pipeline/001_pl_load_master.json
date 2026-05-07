@@ -1,0 +1,188 @@
+{
+	"name": "001_pl_load_master",
+	"properties": {
+		"activities": [
+			{
+				"name": "load_bronze",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "reset_checkpoints",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "002_pl_load_bronze",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "load_silver",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "load_bronze",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "003_pl_load_silver",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "load_gold",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "load_silver",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "004_pl_load_gold",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "load_platinum",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "load_gold",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "005_pl_load_platinum",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "reset_checkpoints",
+				"type": "Script",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "Snowflake_fiji_ls",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": "UPDATE FIJI_AIRWAYS.AUDIT.PIPELINE_CONTROL SET STATUS = 'PENDING'"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			},
+			{
+				"name": "Web_UpdateFailureToJira",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "load_platinum",
+						"dependencyConditions": [
+							"Failed",
+							"Skipped"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"headers": {
+						"Authorization": "Basic dmFyc2hhLmJhamFqQG5hZ2Fycm8uY29tOkFUQVRUM3hGZkdGMHhRNEQtcWFSVWxXb2M1akRoN3loZzY5UUZTR2JqNkNwMzN1NmRWc0ktd2tBYlFyNzI0SVI2aGlQenRXNEhSY1RrLUY3WGdSQmNhSEhYdDFna1hyRzZVTzQ0VFo2Y1RQNWtxUG9Ub3VpeXhqZ0F3N0Z5ZlVGeWg2Wk04b0VKNFFDSFRzcVA3Z0dFQ205Vm84SU83VDJneXhHZTExTnJ5UmVrZDdzQVlOeF85MD1DQzJEMzdGQg==",
+						"Content-Type": "application/json"
+					},
+					"url": "https://one-atlas-orpu.atlassian.net/rest/api/3/issue",
+					"body": {
+						"fields": {
+							"project": {
+								"key": "FGTO"
+							},
+							"summary": "PIPELINE INCIDENT: Failure in gd-to-pl",
+							"description": {
+								"type": "doc",
+								"version": 1,
+								"content": [
+									{
+										"type": "paragraph",
+										"content": [
+											{
+												"text": "The gold-to-platinum pipeline run failed. Investigating as a system problem incident.",
+												"type": "text"
+											}
+										]
+									}
+								]
+							},
+							"issuetype": {
+								"id": "10006"
+							},
+							"customfield_10010": "389"
+						}
+					}
+				}
+			}
+		],
+		"folder": {
+			"name": "Docker-Logic App"
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-05-04T17:49:39Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

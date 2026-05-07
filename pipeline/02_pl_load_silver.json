@@ -1,0 +1,89 @@
+{
+	"name": "02_pl_load_silver",
+	"properties": {
+		"activities": [
+			{
+				"name": "WaitUntilSilverDone",
+				"type": "Until",
+				"dependsOn": [
+					{
+						"activity": "SCR_Load_Silver",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@equals(activity('GetSilverStatus').output.firstRow.STATUS, 'SUCCESS')",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "GetSilverStatus",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "SnowflakeV2Source",
+									"query": "SELECT STATUS FROM FIJI_AIRWAYS.AUDIT.PIPELINE_CONTROL WHERE LAYER_NAME = 'silver'",
+									"exportSettings": {
+										"type": "SnowflakeExportCopyCommand"
+									},
+									"treatDecimalAsString": false
+								},
+								"dataset": {
+									"referenceName": "Snowflake",
+									"type": "DatasetReference"
+								}
+							}
+						}
+					],
+					"timeout": "0.12:00:00"
+				}
+			},
+			{
+				"name": "SCR_Load_Silver",
+				"type": "Script",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "Snowflake_fiji_ls",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": "EXECUTE DBT PROJECT fiji_airways.public.fiji_airline_project\n  ARGS = 'run --select tag:silver --vars ''{\"layer_name\":\"silver\"}''';"
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00",
+					"treatDecimalAsString": false
+				}
+			}
+		],
+		"folder": {
+			"name": "Snowflake Hosted dbt"
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-05-05T10:34:04Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
